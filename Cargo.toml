@@ -1,0 +1,36 @@
+[package]
+name = "drinkup-image"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# HTTP服务框架
+axum = { version = "0.8.4", features = ["multipart"] }
+tokio = { version = "1.45", features = ["full"] }
+tower = "0.5.2"
+tower-http = { version = "0.6.2", features = ["cors", "fs"] }
+
+# 图像处理
+image = "0.25.6"
+imageproc = "0.25.0"
+
+# 序列化和JSON处理
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# HTTP客户端（用于下载图片）
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+
+# Base64编码/解码
+base64 = "0.22.1"
+
+# 错误处理
+anyhow = "1.0"
+thiserror = "2.0.12"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# UUID生成
+uuid = { version = "1.17", features = ["v4"] }

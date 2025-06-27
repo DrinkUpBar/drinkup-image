@@ -1,0 +1,130 @@
+name: Build and Publish Multi‑Arch Image
+
+on:
+  push:
+    branches: ['dev']
+    tags: ['v*']
+  pull_request:
+    branches: ['dev']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # ───────── 1. 检出代码 ─────────
+      - uses: actions/checkout@v4
+
+      # ───────── 2. 配置 Rust 工具链（带交叉编译支持） ─────────
+      - name: Set up Rust with cross-compilation targets
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.82
+          cache: true
+          cache-workspaces: '.'
+          target: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu
+
+      # ───────── 3. 安装交叉编译依赖 ─────────
+      - name: Install cross-compilation dependencies
+        run: |
+          # 禁用不必要的服务来加速安装
+          sudo apt-get update
+          # 跳过man-db触发器和其他不必要的后处理步骤
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            pkg-config \
+            libssl-dev \
+            perl \
+            make \
+            build-essential
+
+      # ───────── 4. 缓存 Cargo 依赖 ─────────
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: cargo-multi-arch-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-multi-arch-
+            cargo-
+
+      # ───────── 5. 交叉编译二进制文件 ─────────
+      - name: Cross-compile for amd64
+        run: |
+          cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Cross-compile for arm64
+        env:
+          # 交叉编译工具链配置
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          # 强制使用vendored OpenSSL
+          OPENSSL_STATIC: 1
+          OPENSSL_VENDORED: 1
+          # 确保不使用pkg-config查找OpenSSL
+          OPENSSL_NO_PKG_CONFIG: 1
+          # 为vendored OpenSSL指定交叉编译器
+          CC: aarch64-linux-gnu-gcc
+          CXX: aarch64-linux-gnu-g++
+          AR: aarch64-linux-gnu-ar
+        run: |
+          cargo build --release --target aarch64-unknown-linux-gnu
+
+      # ───────── 6. 准备二进制文件 ─────────
+      - name: Prepare binaries
+        run: |
+          mkdir -p binaries
+          cp target/x86_64-unknown-linux-gnu/release/drinkup-image binaries/drinkup-image-amd64
+          cp target/aarch64-unknown-linux-gnu/release/drinkup-image binaries/drinkup-image-arm64
+          ls -la binaries/
+
+      # ───────── 7. 启用 QEMU & Buildx ─────────
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # ───────── 8. 登录镜像仓库 ─────────
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.DOCKER_REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # ───────── 9. 构建并推送多架构镜像 ─────────
+      - name: Build and push multi-arch image
+        env:
+          DOCKER_IMAGE_REPO: '${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_ORG }}'
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --tag ${DOCKER_IMAGE_REPO}/drinkup-image:latest \
+            --push \
+            .
+
+      # ───────── 10. 安装并配置 Cosign ─────────
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@main
+        with:
+          cosign-release: 'v2.2.2'
+
+      # ───────── 11. 使用 Cosign 签名镜像 ─────────
+      - name: Sign the images with Cosign
+        env:
+          DOCKER_IMAGE_REPO: '${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_ORG }}'
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          echo "$COSIGN_PRIVATE_KEY" > cosign.key
+          cosign sign --key cosign.key ${DOCKER_IMAGE_REPO}/drinkup-image:latest
+          rm -f cosign.key
+
+      # ───────── 12. 清理构建缓存 ─────────
+      - name: Clean up build cache
+        if: always()
+        run: |
+          docker system prune -f
