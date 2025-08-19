@@ -1,0 +1,32 @@
+# Rust
+target/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile*
+.dockerignore
+
+# Documentation
+README.md
+LICENSE
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local 
