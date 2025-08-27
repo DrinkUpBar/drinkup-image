@@ -1,4 +1,5 @@
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{get, post},
     Json, Router,
 };
@@ -19,6 +20,7 @@ async fn main() {
         .route("/health", get(health_check))
         .route("/process", post(ImageController::process_image))
         .route("/process-form", post(ImageController::process_image_form))
+        .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 设置最大请求体大小为100MB
         .layer(CorsLayer::permissive());
 
     info!("启动图像处理服务在端口 3000");
